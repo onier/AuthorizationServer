@@ -5,10 +5,12 @@
  */
 package org.master.config;
 
+import java.util.Arrays;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.context.annotation.PropertySources;
 import org.springframework.core.env.Environment;
@@ -24,9 +26,16 @@ import org.springframework.security.oauth2.config.annotation.web.configuration.E
 import org.springframework.security.oauth2.config.annotation.web.configuration.ResourceServerConfigurerAdapter;
 import org.springframework.security.oauth2.config.annotation.web.configurers.ResourceServerSecurityConfigurer;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.security.oauth2.common.OAuth2AccessToken;
+import org.springframework.security.oauth2.common.OAuth2RefreshToken;
 import org.springframework.security.oauth2.config.annotation.web.configurers.AuthorizationServerEndpointsConfigurer;
+import org.springframework.security.oauth2.provider.OAuth2Authentication;
+import org.springframework.security.oauth2.provider.token.DefaultTokenServices;
+import org.springframework.security.oauth2.provider.token.TokenEnhancer;
+import org.springframework.security.oauth2.provider.token.TokenEnhancerChain;
 import org.springframework.security.oauth2.provider.token.TokenStore;
-import org.springframework.security.oauth2.provider.token.store.JdbcTokenStore;
+import org.springframework.security.oauth2.provider.token.store.JwtAccessTokenConverter;
+import org.springframework.security.oauth2.provider.token.store.JwtTokenStore;
 
 public class Config {
 
@@ -63,13 +72,38 @@ public class Config {
         @Override
         public void configure(
                 AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
-            endpoints
-                    .tokenStore(tokenStore());
+            TokenEnhancerChain tokenEnhancerChain = new TokenEnhancerChain();
+            tokenEnhancerChain.setTokenEnhancers(Arrays.asList(tokenEnhancer(), accessTokenConverter()));
+            endpoints.tokenStore(tokenStore()).tokenEnhancer(tokenEnhancerChain);
+        }
+
+        @Bean
+        public TokenEnhancer tokenEnhancer() {
+            return new CustomTokenEnhancer();
         }
 
         @Bean
         public TokenStore tokenStore() {
-            return new JdbcTokenStore(dataSource());
+//            return new JdbcTokenStore(dataSource());
+            return new JwtTokenStore(accessTokenConverter()) {
+
+                @Override
+                public void storeRefreshToken(OAuth2RefreshToken refreshToken, OAuth2Authentication authentication) {
+                    super.storeRefreshToken(refreshToken, authentication); //To change body of generated methods, choose Tools | Templates.
+                }
+
+                @Override
+                public void storeAccessToken(OAuth2AccessToken token, OAuth2Authentication authentication) {
+                    super.storeAccessToken(token, authentication); //To change body of generated methods, choose Tools | Templates.
+                }
+            };
+        }
+
+        @Bean
+        public JwtAccessTokenConverter accessTokenConverter() {
+            JwtAccessTokenConverter converter = new JwtAccessTokenConverter();
+            converter.setSigningKey("123");
+            return converter;
         }
 
         private DataSource dataSource() {
@@ -82,45 +116,4 @@ public class Config {
         }
 
     }
-
-    @Configuration
-    @EnableResourceServer
-    static class OAuthResourceConfig extends ResourceServerConfigurerAdapter {
-
-        @Override
-        public void configure(ResourceServerSecurityConfigurer resources) throws Exception {
-            resources.resourceId(RESOURCE_ID);
-        }
-
-        @Override
-        public void configure(HttpSecurity http) throws Exception {
-            http.authorizeRequests()
-                    .antMatchers(HttpMethod.GET, "/api/**").access("#oauth2.hasScope('read')")
-                    .antMatchers(HttpMethod.POST, "/api/**").access("#oauth2.hasScope('write')");
-        }
-    }
-
-    @Configuration
-    @EnableWebSecurity
-    static class SecurityConfig extends WebSecurityConfigurerAdapter {
-
-        @Override
-        protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-            auth.inMemoryAuthentication()
-                    .withUser("user").password("123").roles("USER")
-                    .and()
-                    .withUser("admin").password("123").roles("ADMIN");
-
-        }
-
-        @Override
-        protected void configure(HttpSecurity http) throws Exception {
-            http.csrf().disable();
-            http.authorizeRequests()
-                    .antMatchers("/oauth/authorize").authenticated()
-                    .and()
-                    .httpBasic().realmName("OAuth Server");
-        }
-    }
-
 }
